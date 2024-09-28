@@ -109,12 +109,6 @@ RUN apt-get update && \
     apt-get update && \
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 
 
-## Install trivy
-RUN wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | apt-key add - && \
-        echo deb https://aquasecurity.github.io/trivy-repo/deb bookworm main | tee -a /etc/apt/sources.list.d/trivy.list && \
-        apt-get update && apt-get install trivy 
-
-
 # setup SSH server
 RUN sed -i /etc/ssh/sshd_config \
         -e 's/#PermitRootLogin.*/PermitRootLogin no/' \
