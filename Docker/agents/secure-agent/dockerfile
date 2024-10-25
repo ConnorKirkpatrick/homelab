@@ -1,117 +1,25 @@
-ARG DEBIAN_RELEASE=bookworm-20240812
-FROM debian:"${DEBIAN_RELEASE}"-slim as jre-build
-# FROM bitnami/minideb as jre-build
-
-SHELL ["/bin/bash", "-e", "-u", "-o", "pipefail", "-c"]
-
-# This Build ARG is populated by Docker
-# Ref. https://docs.docker.com/engine/reference/builder/#automatic-platform-args-in-the-global-scope
-ARG TARGETPLATFORM
-
-COPY jdk-download-url.sh /usr/bin/local/jdk-download-url.sh
-COPY jdk-download.sh /usr/bin/local/jdk-download.sh
-
-ARG JAVA_VERSION=17.0.12_7
-RUN chmod 777 /usr/bin/local/jdk-download-url.sh && chmod 777 jdk-download.sh /usr/bin/local/jdk-download.sh
-RUN set -x; apt-get update \
-  && apt-get install --no-install-recommends -y \
-  ca-certificates \
-  #jq \
-  curl \
-  && /usr/bin/local/jdk-download.sh && apt-get clean
-
-ENV PATH="/opt/jdk-${JAVA_VERSION}/bin:${PATH}"
-
-# Generate smaller java runtime without unneeded files
-# for now we include the full module path to maintain compatibility
-# while still saving space (approx 200mb from the full distribution)
-RUN case "$(jlink --version 2>&1)" in \
-  # jlink version 11 has less features than JDK17+
-  "11."*) set -- "--strip-debug" "--compress=2" ;; \
-  "17."*) set -- "--strip-java-debug-attributes" "--compress=2" ;; \
-  # the compression argument is different for JDK21
-  "21."*) set -- "--strip-java-debug-attributes" "--compress=zip-6" ;; \
-  *) echo "ERROR: unmanaged jlink version pattern" && exit 1 ;; \
-  esac; \
-  jlink \
-  "$1" \
-  "$2" \
-  --add-modules ALL-MODULE-PATH \
-  --no-man-pages \
-  --no-header-files \
-  --output /javaruntime
-
-# FROM bitnami/minideb
-FROM debian:"${DEBIAN_RELEASE}"-slim
-
-ARG user=jenkins
-ARG group=jenkins
-ARG uid=1000
-ARG gid=1000
-ARG JENKINS_AGENT_HOME=/home/${user}
-
-ENV JENKINS_AGENT_HOME=${JENKINS_AGENT_HOME}
-ARG AGENT_WORKDIR="${JENKINS_AGENT_HOME}/agent"
-# Persist agent workdir path through an environment variable for people extending the image
-ENV AGENT_WORKDIR=${AGENT_WORKDIR}
-
-RUN groupadd -g ${gid} ${group} \
-  && useradd -d "${JENKINS_AGENT_HOME}" -u "${uid}" -g "${gid}" -m -s /bin/bash "${user}" \
-  # Prepare subdirectories
-  && mkdir -p "${JENKINS_AGENT_HOME}/.ssh/" "${AGENT_WORKDIR}" "${JENKINS_AGENT_HOME}/.jenkins" \
-  # Make sure that user 'jenkins' own these directories and their content
-  && chown -R "${uid}":"${gid}" "${JENKINS_AGENT_HOME}" "${AGENT_WORKDIR}"
+FROM jenkins/ssh-agent:debian-jdk17 as ssh-agent
 
 RUN apt-get update \
   && apt-get install --no-install-recommends -y \
   ca-certificates \
-  git-lfs \
-  less \
-  netcat-traditional \
-  openssh-server \
-  patch \
-  curl \
-  apt-transport-https \
   gnupg \
-  wget \
+  curl \
   lsb-release \
-  apt-transport-https \
-  && rm -rf /var/lib/apt/lists/* && apt-get clean && \
-  # install docker
-  install -m 0755 -d /etc/apt/keyrings && \
-  curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
-  chmod a+r /etc/apt/keyrings/docker.asc && \
-  echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo bookworm main) stable" | \
-  tee /etc/apt/sources.list.d/docker.list > /dev/null && \
-  apt-get update && \
-  apt-get install -y docker-ce docker-ce-cli containerd.io && apt-get clean &&\
-  # Install Trivy
-  wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | apt-key add - && \
+  wget \
+  && rm -rf /var/lib/apt/lists/*
+
+# install docker
+RUN curl -fsSLo /usr/share/keyrings/docker-archive-keyring.asc https://download.docker.com/linux/debian/gpg
+RUN echo "deb [arch=$(dpkg --print-architecture) \
+  signed-by=/usr/share/keyrings/docker-archive-keyring.asc] \
+  https://download.docker.com/linux/debian \
+  $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+RUN apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+  docker-ce docker-ce-cli containerd.io && apt-get clean \
+  && rm -rf /var/lib/apt/lists/*
+# Install Trivvy
+RUN wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | apt-key add - && \
   echo deb https://aquasecurity.github.io/trivy-repo/deb bookworm main | tee -a /etc/apt/sources.list.d/trivy.list && \
-  apt-get update && apt-get install trivy && apt-get clean
-
-# setup SSH server
-RUN sed -i /etc/ssh/sshd_config \
-  -e 's/#PermitRootLogin.*/PermitRootLogin no/' \
-  -e 's/#RSAAuthentication.*/RSAAuthentication yes/'  \
-  -e 's/#PasswordAuthentication.*/PasswordAuthentication no/' \
-  -e 's/#SyslogFacility.*/SyslogFacility AUTH/' \
-  -e 's/#LogLevel.*/LogLevel INFO/' && \
-  mkdir /var/run/sshd
-
-# VOLUME directive must happen after setting up permissions and content
-VOLUME "${AGENT_WORKDIR}" "${JENKINS_AGENT_HOME}"/.jenkins "/tmp" "/run" "/var/run"
-WORKDIR "${JENKINS_AGENT_HOME}"
-
-ENV LANG='C.UTF-8' LC_ALL='C.UTF-8'
-
-ENV JAVA_HOME=/opt/java/openjdk
-ENV PATH="${JAVA_HOME}/bin:${PATH}"
-COPY --from=jre-build /javaruntime $JAVA_HOME
-
-RUN echo "PATH=${PATH}" >> /etc/environment
-COPY setup-sshd /usr/local/bin/setup-sshd
-
-EXPOSE 22
-
-ENTRYPOINT ["setup-sshd"]
+  apt-get update && apt-get install trivy && apt-get cleansliml
