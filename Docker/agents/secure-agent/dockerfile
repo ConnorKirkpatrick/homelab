@@ -22,4 +22,4 @@ RUN apt-get update \
 # Install Trivvy
 RUN wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | apt-key add - && \
   echo deb https://aquasecurity.github.io/trivy-repo/deb bookworm main | tee -a /etc/apt/sources.list.d/trivy.list && \
-  apt-get update && apt-get install trivy && apt-get cleansliml
+  apt-get update && apt-get install trivy && apt-get clean
