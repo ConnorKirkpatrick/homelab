@@ -12,7 +12,8 @@ COPY jdk-download-url.sh /usr/bin/local/jdk-download-url.sh
 COPY jdk-download.sh /usr/bin/local/jdk-download.sh
 
 ARG JAVA_VERSION=17.0.12_7
-RUN set -x; apt-get update \
+RUN chmod 777 /usr/bin/local/jdk-download-url.sh && chmod 777 jdk-download.sh /usr/bin/local/jdk-download.sh && \
+  set -x; apt-get update \
   && apt-get install --no-install-recommends -y \
   ca-certificates \
   jq \
