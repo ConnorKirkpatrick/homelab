@@ -1,0 +1,47 @@
+// This is not functional, this pipeline is statically defined inside the jenkins build job
+pipeline {
+    agent {label 'default'} 
+    stages { 
+        stage('Tool check') {
+            steps {  
+                sh '''
+                docker --version
+                trivy --version
+                '''
+            }
+        }
+        stage('Build default agent'){
+            steps{
+                script{
+                    // checkout our agent repos
+                    git branch: 'main', changelog: false, poll: false, url: 'https://github.com/ConnorKirkpatrick/homelab.git'
+                    // build the secure agent
+                    dir('Docker/agents/secure-agent') {
+                         secureAgent = docker.build "localhost:5000/secure-agent"  
+                    }
+                    //validate the security of the secure agent
+                    def scan_results = sh (script: "trivy image --db-repository public.ecr.aws/aquasecurity/trivy-db:2 --java-db-repository public.ecr.aws/aquasecurity/trivy-java-db:1 --skip-dirs /etc/ssh --ignore-unfixed localhost:5000/secure_default", returnStdout: true).trim()
+                    echo "${scan_results}"
+                    if(scan_results.contains("CRITICAL: 0") && scan_results.contains("HIGH: 0")){
+                        sh """
+                        docker image ls
+                        docker push localhost:5000/secure-agent
+                        """
+                    } else {
+                        error("Build failed with vulnerabilities")
+                    }
+                }
+            }
+            
+        }
+    }
+    post {
+        always {
+            sh '''
+            docker system prune -a -f
+            docker volume prune -a -f
+            '''
+            cleanWs()
+        }
+    }
+}
