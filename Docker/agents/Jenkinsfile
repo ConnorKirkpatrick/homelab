@@ -20,7 +20,7 @@ pipeline {
                          secureAgent = docker.build "localhost:5000/secure-agent"  
                     }
                     //validate the security of the secure agent
-                    def scan_results = sh (script: "trivy image --db-repository public.ecr.aws/aquasecurity/trivy-db:2 --java-db-repository public.ecr.aws/aquasecurity/trivy-java-db:1 --skip-dirs /etc/ssh --ignore-unfixed localhost:5000/secure_default", returnStdout: true).trim()
+                    def scan_results = sh (script: "trivy image --db-repository public.ecr.aws/aquasecurity/trivy-db:2 --java-db-repository public.ecr.aws/aquasecurity/trivy-java-db:1 --skip-dirs /etc/ssh --ignore-unfixed localhost:5000/secure-agent", returnStdout: true).trim()
                     echo "${scan_results}"
                     if(scan_results.contains("CRITICAL: 0") && scan_results.contains("HIGH: 0")){
                         sh """
